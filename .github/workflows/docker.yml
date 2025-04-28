@@ -4,7 +4,7 @@ on:
     branches: [ main ]       # or whatever branch you deploy from
 
 env:
-  IMAGE_NAME: runpod-worker-comfy-custom
+  IMAGE_NAME: dockerdepth
   REGISTRY: ghcr.io/${{ github.repository_owner }}
 
 permissions:
