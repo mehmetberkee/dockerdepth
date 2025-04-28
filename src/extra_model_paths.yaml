@@ -12,3 +12,4 @@ runpod_worker_comfy:
   unet:        ComfyUI/models/unet/
   pulid: ComfyUI/models/pulid/
   insightface: ComfyUI/models/insightface/
+  custom_nodes: ComfyUI/custom_nodes/

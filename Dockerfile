@@ -6,11 +6,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Prefer binary wheels over source distributions for faster pip installations
 ENV PIP_PREFER_BINARY=1
 # Ensures output from python is printed immediately to the terminal without buffering
-ENV PYTHONUNBUFFERED=1 
+ENV PYTHONUNBUFFERED=1
 # Speed up some cmake builds
 ENV CMAKE_BUILD_PARALLEL_LEVEL=8
 
 # Install Python, git and other necessary tools
+# git'e hala ihtiyaç olabilir (eğer start.sh içinde klonlama yapacaksanız) veya bazı pip paketleri için.
 RUN apt-get update && apt-get install -y \
     python3.10 python3-pip git wget \
     libgl1 \
@@ -19,59 +20,49 @@ RUN apt-get update && apt-get install -y \
  && ln -sf /usr/bin/python3.10 /usr/bin/python \
  && ln -sf /usr/bin/pip3 /usr/bin/pip
 
-
 # Clean up to reduce image size
 RUN apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/*
 
 # Install comfy-cli
-RUN pip install comfy-cli
+RUN pip install --no-cache-dir comfy-cli
 
 # Install ComfyUI
+# --workspace /comfyui kullanıldığı için ComfyUI /comfyui altına kurulacak
 RUN /usr/bin/yes | comfy --workspace /comfyui install --cuda-version 11.8 --nvidia --version 0.3.18
 
 # Change working directory to ComfyUI
 WORKDIR /comfyui
 
-###############################################################################
-# ⬇︎  BU BLOĞU “WORKDIR /comfyui” SATIRINDAN SONRA EKLEYİN  ⬇︎
-###############################################################################
+# --------------------------------------------------------------------------
+#      CUSTOM NODE KURULUMU ARTIK IMAJDA YAPILMAYACAK - start.sh HALLEDECEK
+# --------------------------------------------------------------------------
+# # — 1) Klonlanacak node repo’larının listesi (KALDIRILDI)
+# ARG CUSTOM_NODE_REPOS="..."
 
-# — 1) Klonlanacak node repo’larının listesi
-ARG CUSTOM_NODE_REPOS="\
-cg-use-everywhere=https://github.com/chrisgoringe/cg-use-everywhere.git \
-comfyui-kjnodes=https://github.com/kijai/ComfyUI-KJNodes.git \
-pulid-comfyui=https://github.com/cubiq/PuLID_ComfyUI.git \
-comfyui-pulid-flux-ll=https://github.com/lldacing/ComfyUI_PuLID_Flux_ll.git \
-comfyui_controlnet_aux=https://github.com/Fannovel16/comfyui_controlnet_aux.git \
-comfyui_essentials=https://github.com/cubiq/ComfyUI_essentials.git"
+# # — 2) Hepsini /comfyui/custom_nodes altına klonla (KALDIRILDI)
+# RUN set -eux; \
+#     # ... git clone komutları ...
 
-# — 2) Hepsini /comfyui/custom_nodes altına klonla
-RUN set -eux; \
-    mkdir -p /comfyui/custom_nodes; \
-    for entry in $CUSTOM_NODE_REPOS; do \
-        name="${entry%%=*}"; repo="${entry#*=}"; \
-        echo ">>> Cloning $repo -> $name"; \
-        git clone --depth 1 "$repo" "/comfyui/custom_nodes/$name"; \
-    done
+# # — 3) requirements.txt bulunan klasörleri bulup kur (KALDIRILDI)
+# RUN find /comfyui/custom_nodes -name requirements.txt | while read -r req_file; do \
+#     # ... pip install komutları ...
+# --------------------------------------------------------------------------
 
+# --- Aktif Node'ları Tanımla (start.sh için) ---
+# start.sh script'inin persistent volume'da hangi node klasörlerindeki
+# requirements.txt dosyalarını işleyeceğini belirtir.
+# İSİMLERİN persistent volume'daki KLASÖR İSİMLERİYLE EŞLEŞTİĞİNDEN EMİN OLUN!
+ENV ACTIVE_CUSTOM_NODES="cg-use-everywhere comfyui-kjnodes pulid-comfyui comfyui-pulid-flux-ll comfyui_controlnet_aux comfyui_essentials"
+# -------------------------------------------------
+
+# --- Temel Python Paketleri (İsteğe bağlı, imajda tutulabilir) ---
+# Pillow gibi sık kullanılan veya ComfyUI'ın kendisinin ihtiyaç duyabileceği paketler.
 RUN pip install --no-cache-dir \
     packaging filetype pillow
-# — 3) requirements.txt bulunan klasörleri bulup kur
-RUN find /comfyui/custom_nodes -name requirements.txt | while read -r req_file; do \
-        echo ">>> Installing requirements from $req_file"; \
-        pip install --no-cache-dir -r "$req_file"; \
-        if [ $? -ne 0 ]; then \
-            echo "ERROR: Failed to install requirements from $req_file" >&2; \
-            exit 1; \
-        fi; \
-    done
-
-###############################################################################
-# ⬆︎  EK BLOK BİTTİ  ⬆︎
-###############################################################################
-
+# ----------------------------------------------------------------
 
 # ---------------- PuLID için Gerekli Bağımlılıkları Kur ------------------
+# Bunlar temel ML kütüphaneleri olduğu için imajda kalması mantıklıdır.
 
 # facexlib için gerekli olabilecek sistem kütüphanesi
 RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 && \
@@ -81,29 +72,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 && \
 RUN pip install --no-cache-dir --use-pep517 facexlib
 
 # 2. insightface'in belirli sürümünü (0.7.3) ve onnxruntime-gpu'yu PyPI'dan kur
-#    Not: CUDA ortamında olduğumuz için onnxruntime-gpu kullanıyoruz.
 RUN pip install --no-cache-dir insightface==0.7.3 onnxruntime-gpu
 
 # --------------------------------------------------------------------------
 
 # Install runpod
-RUN pip install runpod requests
+RUN pip install --no-cache-dir runpod requests
 
 # Support for the network volume
+# extra_model_paths.yaml'ı /comfyui/ içine kopyalar (WORKDIR /comfyui olduğu için)
 ADD src/extra_model_paths.yaml ./
 
 # Go back to the root
 WORKDIR /
 
 # Add scripts
-ADD src/start.sh src/restore_snapshot.sh src/rp_handler.py test_input.json ./
-RUN chmod +x /start.sh /restore_snapshot.sh
+# start.sh, rp_handler.py vb. scriptleri kök dizine kopyalar
+ADD src/start.sh src/rp_handler.py test_input.json ./
+# restore_snapshot.sh artık kullanılmıyor, onu ADD satırından çıkarabilirsin (opsiyonel)
+# ADD src/restore_snapshot.sh ./ # Bu satırı kaldır veya yorum satırı yap
 
-# Optionally copy the snapshot file
-ADD *snapshot*.json /
+# Kopyalanan scriptlere çalıştırma izni ver
+RUN chmod +x /start.sh /rp_handler.py
+# RUN chmod +x /restore_snapshot.sh # Bu satırı kaldır veya yorum satırı yap
 
-# Restore the snapshot to install custom nodes
-RUN /restore_snapshot.sh
+# Snapshot dosyası kopyalama ve çalıştırma adımları kaldırıldı
+# ADD *snapshot*.json /
+# RUN /restore_snapshot.sh
 
 # Start container
 CMD ["/start.sh"]
