@@ -145,7 +145,7 @@ COMFYUI_BASE_ARGS="--disable-auto-launch --disable-metadata --extra-model-paths-
 
 # Serve the API and don't shutdown the container
 if [ "$SERVE_API_LOCALLY" == "true" ]; then
-    echo "runpod-worker-comfy: ComfyUI (API modu) başlatılıyor..."
+    echo "runpod-worker-comfy: ComfyUI (API modu) başlatılıyor.."
     python3 /comfyui/main.py ${COMFYUI_BASE_ARGS} --listen &
 
     echo "runpod-worker-comfy: RunPod Handler (API modu) başlatılıyor..."
